@@ -14,7 +14,17 @@ function hasAnyRole(member, roleIdsStr) {
 }
 
 function isOwner(member, settings) {
-  return hasAnyRole(member, settings.owner_roles);
+  // تحقق من الرتب المحفوظة بقاعدة البيانات
+  if (hasAnyRole(member, settings.owner_roles)) return true;
+
+  // احتياطي: تحقق من متغير البيئة OWNER_ROLE_ID لو قاعدة البيانات فاضية
+  const envOwnerRole = process.env.OWNER_ROLE_ID;
+  if (envOwnerRole && member.roles.cache.has(envOwnerRole)) return true;
+
+  // احتياطي أخير: مالك السيرفر الحقيقي دايماً يقدر يستخدم الأوامر
+  if (member.guild.ownerId === member.id) return true;
+
+  return false;
 }
 
 function canAddPoints(member, settings) {
