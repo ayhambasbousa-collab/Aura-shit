@@ -5,6 +5,7 @@ const path                 = require('path');
 const db                   = require('./database');
 const { handleMessage }    = require('./prefix-handler');
 const { startAutoReport }  = require('./auto-report');
+const tm                   = require('./tournamentManager');
 
 // ─── Validate env ─────────────────────────────────────────────────────────────
 const token = process.env.BOT_TOKEN;
@@ -100,6 +101,7 @@ function attachEvents(client, prefixEnabled) {
   if (prefixEnabled) {
     client.on(Events.MessageCreate, (msg) => {
       handleMessage(msg, client).catch(console.error);
+      tm.handleMessage(msg).catch(console.error);
     });
   }
 }
