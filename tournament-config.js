@@ -1,6 +1,6 @@
 module.exports = {
   // مدة استقبال الإجابات بعد فتح الشات (بالثواني)
-  QUESTION_TIMEOUT: 30,
+  QUESTION_TIMEOUT: 60,
 
   // العد التنازلي قبل عرض كل سؤال (بالثواني)
   COUNTDOWN_SECONDS: 3,
