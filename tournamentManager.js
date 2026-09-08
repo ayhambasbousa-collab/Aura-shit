@@ -74,6 +74,26 @@ function roundPointsSummary(round) {
     : `\`${Math.min(...pts)}–${Math.max(...pts)}\` نقطة (تصاعدي)`;
 }
 
+function buildTournamentOverviewEmbed() {
+  const embed = new EmbedBuilder()
+    .setColor(0xFFD700)
+    .setAuthor(BRAND_AUTHOR)
+    .setTitle('🏆 بطولة أورا الكبرى')
+    .setDescription('### 🎉 استعدوا! 5 جولات • 25 سؤال • إجمالي 106 نقطة');
+
+  for (const round of questionsData.rounds) {
+    embed.addFields({
+      name: `${round.icon} ${round.name}`,
+      value: `${round.questions.length} أسئلة — ${roundPointsSummary(round)}`,
+      inline: false,
+    });
+  }
+
+  embed.setFooter({ text: `🚨 الجولة الأولى تبدأ خلال ${config.TOURNAMENT_INTRO_WAIT_SECONDS} ثانية — استعدوا!` });
+  embed.setTimestamp();
+  return embed;
+}
+
 function totalQuestionsCount() {
   return questionsData.rounds.reduce((sum, r) => sum + r.questions.length, 0);
 }
@@ -160,14 +180,12 @@ async function runTournamentSequence(guildId, client) {
   const channel = getChannel(state, client);
   if (!channel) return;
 
-  const openEmbed = new EmbedBuilder()
-    .setColor(0xFFD700)
-    .setTitle('🏆 بطولة أورا الكبرى')
-    .setDescription('### 🎉 استعدوا! البطولة راح تبدأ الآن\n5 جولات • 25 سؤال • إجمالي 106 نقطة')
-    .setTimestamp();
-  await channel.send({ embeds: [openEmbed] }).catch(() => {});
+  // رسالة وحدة مختصرة توضح كل الجولات دفعة وحدة
+  await channel.send({ embeds: [buildTournamentOverviewEmbed()] }).catch(() => {});
 
-  await announceRoundIntro(channel, questionsData.rounds[0]);
+  // ربع دقيقة انتظار — لحظة مميزة قبل انطلاق البطولة
+  await sleep(config.TOURNAMENT_INTRO_WAIT_SECONDS * 1000);
+
   await runQuestionCycle(guildId, client);
 }
 
@@ -354,6 +372,7 @@ async function afterQuestionResolved(guildId, client) {
 
   // ما نعرض "الترتيب الحالي" إذا هذا آخر سؤال بالبطولة (بيطلع النتيجة النهائية بعده مباشرة)
   if (channel && !isTournamentEnd) {
+    await sleep(config.MESSAGE_GAP_SECONDS * 1000);
     await sendTopEmbed(channel, state);
   }
 
@@ -363,7 +382,10 @@ async function afterQuestionResolved(guildId, client) {
     if (isTournamentEnd) {
       return finishTournament(guildId, client);
     }
-    if (channel) await announceRoundTransition(channel, round, nextRound);
+    if (channel) {
+      await sleep(config.MESSAGE_GAP_SECONDS * 1000);
+      await announceRoundTransition(channel, round, nextRound);
+    }
     state.roundIndex += 1;
     state.questionIndex = 0;
   }
@@ -390,20 +412,6 @@ async function sendTopEmbed(channel, state) {
   await channel.send({ embeds: [embed] }).catch(() => {});
 }
 
-async function announceRoundIntro(channel, round) {
-  const embed = new EmbedBuilder()
-    .setColor(roundColor(round))
-    .setAuthor(BRAND_AUTHOR)
-    .setTitle(`${round.icon} ${round.name}`)
-    .setDescription(round.description || 'استعدوا للأسئلة القادمة!')
-    .addFields(
-      { name: '🔢 عدد الأسئلة', value: `\`${round.questions.length}\``, inline: true },
-      { name: '⭐ النقاط', value: roundPointsSummary(round), inline: true },
-    )
-    .setTimestamp();
-
-  await channel.send({ embeds: [embed] }).catch(() => {});
-}
 
 async function announceRoundTransition(channel, finishedRound, nextRound) {
   const embed = new EmbedBuilder()
@@ -509,3 +517,4 @@ module.exports = {
   advanceManual,
   currentScoreEmbed,
 };
+       
