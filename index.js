@@ -1,11 +1,12 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Collection, Events, ActivityType } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, Events, ActivityType, Partials } = require('discord.js');
 const fs                   = require('fs');
 const path                 = require('path');
 const db                   = require('./database');
 const { handleMessage }    = require('./prefix-handler');
 const { startAutoReport }  = require('./auto-report');
 const tm                   = require('./tournamentManager');
+const rr                   = require('./reactionRoleManager');
 
 // ─── Validate env ─────────────────────────────────────────────────────────────
 const token = process.env.BOT_TOKEN;
@@ -13,9 +14,18 @@ if (!token) { console.error('❌ BOT_TOKEN غير موجود'); process.exit(1);
 
 // ─── Build client ─────────────────────────────────────────────────────────────
 function buildClient(withMessageContent) {
-  const intents = [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages];
+  const intents = [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMessageReactions, // لازمة لنظام الرتب عبر الرياكت
+    GatewayIntentBits.GuildMembers,          // لازمة لإضافة/إزالة الرتب (privileged intent)
+  ];
   if (withMessageContent) intents.push(GatewayIntentBits.MessageContent);
-  return new Client({ intents });
+
+  return new Client({
+    intents,
+    partials: [Partials.Message, Partials.Channel, Partials.Reaction, Partials.User],
+  });
 }
 
 // ─── Load commands ────────────────────────────────────────────────────────────
@@ -97,6 +107,14 @@ function attachEvents(client, prefixEnabled) {
     }
   });
 
+  // Reaction roles — يشتغل دايمًا (ما يحتاج MessageContent)
+  client.on(Events.MessageReactionAdd, (reaction, user) => {
+    rr.handleReactionAdd(reaction, user).catch(console.error);
+  });
+  client.on(Events.MessageReactionRemove, (reaction, user) => {
+    rr.handleReactionRemove(reaction, user).catch(console.error);
+  });
+
   // Prefix commands
   if (prefixEnabled) {
     client.on(Events.MessageCreate, (msg) => {
@@ -119,6 +137,14 @@ async function start(withMessageContent = true) {
       console.warn('\n⚠️  MessageContent intent غير مفعّل — إعادة المحاولة بدون أوامر !\n');
       client.destroy();
       return start(false);
+    }
+    if (err.message?.includes('disallowed intents')) {
+      console.error('\n══════════════════════════════════════════════');
+      console.error('❌ فشل تسجيل الدخول: صلاحية (Intent) غير مفعّلة');
+      console.error('روح لـ discord.com/developers/applications ← تطبيقك ← Bot');
+      console.error('وفعّل: SERVER MEMBERS INTENT ✓ (لازمة لنظام الرتب عبر الرياكت)');
+      console.error('══════════════════════════════════════════════\n');
+      process.exit(1);
     }
     console.error('❌ فشل تسجيل الدخول:', err.message);
     process.exit(1);
