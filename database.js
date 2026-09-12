@@ -37,6 +37,17 @@ async function init() {
       report_hour           INTEGER NOT NULL DEFAULT 9,
       last_report_at        BIGINT NOT NULL DEFAULT 0
     );
+
+    CREATE TABLE IF NOT EXISTS discord_reaction_roles (
+      id          SERIAL PRIMARY KEY,
+      guild_id    TEXT NOT NULL,
+      channel_id  TEXT NOT NULL,
+      message_id  TEXT NOT NULL,
+      emoji_key   TEXT NOT NULL,
+      emoji_label TEXT NOT NULL,
+      role_id     TEXT NOT NULL,
+      UNIQUE(message_id, emoji_key)
+    );
   `);
   console.log('✅ قاعدة البيانات جاهزة');
 }
@@ -269,10 +280,45 @@ async function getGuildStats(guildId, since) {
   return rows[0];
 }
 
+// ─── Reaction Roles ────────────────────────────────────────────────────────────
+
+async function addReactionRole(guildId, channelId, messageId, emojiKey, emojiLabel, roleId) {
+  await pool.query(`
+    INSERT INTO discord_reaction_roles (guild_id, channel_id, message_id, emoji_key, emoji_label, role_id)
+    VALUES ($1, $2, $3, $4, $5, $6)
+    ON CONFLICT (message_id, emoji_key)
+    DO UPDATE SET role_id = $6, emoji_label = $5
+  `, [guildId, channelId, messageId, emojiKey, emojiLabel, roleId]);
+}
+
+async function removeReactionRole(messageId, emojiKey) {
+  const { rowCount } = await pool.query(
+    `DELETE FROM discord_reaction_roles WHERE message_id = $1 AND emoji_key = $2`,
+    [messageId, emojiKey]
+  );
+  return rowCount > 0;
+}
+
+async function getReactionRole(messageId, emojiKey) {
+  const { rows } = await pool.query(
+    `SELECT * FROM discord_reaction_roles WHERE message_id = $1 AND emoji_key = $2`,
+    [messageId, emojiKey]
+  );
+  return rows[0] || null;
+}
+
+async function listReactionRoles(guildId) {
+  const { rows } = await pool.query(
+    `SELECT * FROM discord_reaction_roles WHERE guild_id = $1 ORDER BY id ASC`,
+    [guildId]
+  );
+  return rows;
+}
+
 module.exports = {
   init,
   getGuildSettings, setGuildSetting, updateLastReport, getAllGuildSettings,
   addPoints, deductPoints, setPoints, resetPoints, deleteTransaction,
   getPoints, getHistory, getAllTransactions, getLeaderboard, getGuildStats,
+  addReactionRole, removeReactionRole, getReactionRole, listReactionRoles,
 };
-    
