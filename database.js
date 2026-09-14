@@ -247,6 +247,15 @@ async function getHistory(userId, guildId, limit = 15) {
   `, [userId, guildId, limit]);
   return rows;
 }
+async function getFullHistory(userId, guildId) {
+  const { rows } = await pool.query(`
+    SELECT id, points, reason, type, added_by, ts
+    FROM discord_transactions
+    WHERE user_id = $1 AND guild_id = $2
+    ORDER BY ts ASC
+  `, [userId, guildId]);
+  return rows;
+}
 async function getAllTransactions(guildId) {
   const { rows } = await pool.query(`
     SELECT id, user_id, points, reason, type, added_by, ts
@@ -319,6 +328,6 @@ module.exports = {
   init,
   getGuildSettings, setGuildSetting, updateLastReport, getAllGuildSettings,
   addPoints, deductPoints, setPoints, resetPoints, deleteTransaction,
-  getPoints, getHistory, getAllTransactions, getLeaderboard, getGuildStats,
+  getPoints, getHistory, getFullHistory, getAllTransactions, getLeaderboard, getGuildStats,
   addReactionRole, removeReactionRole, getReactionRole, listReactionRoles,
 };
