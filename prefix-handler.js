@@ -41,7 +41,7 @@ async function handleMessage(message, client) {
         { name: '🔄 تصفير',         value: '`!تصفير @عضو تأكيد`' },
         { name: '🗑️ حذف عملية',    value: '`!حذف_سجل <رقم_العملية>`' },
         { name: '📊 النقاط',         value: '`!نقاط @عضو`' },
-        { name: '📋 السجل',          value: '`!سجل @عضو`' },
+        { name: '📋 السجل الكامل',   value: '`!سجل @عضو`' },
         { name: '🏆 الترتيب',        value: '`!ترتيب`' },
         { name: '📊 تقرير فوري',     value: '`!تقرير`  (المالك)' },
       )
@@ -201,10 +201,10 @@ async function handleMessage(message, client) {
 
   // ── !نيوك (مقلب) ─────────────────────────────────────────────────────────
   if (command === 'نيوك') {
-    return message.reply('جاري عمل نيوك للسيرفر🚀..\n|| مقلب😭✌️||');
+    return message.reply('جاري عمل نيوك للسيرفر🚀..\n');
   }
 
-  // ── !سجل_قديم (عرض كل السجلات) ──────────────────────────────────────────────
+  // ── !سجل_قديم (عرض كل سجلات السيرفر) ────────────────────────────────────────
   if (command === 'سجل_قديم') {
     if (!isOwner(message.member, settings))
       return message.reply('❌ هذا الأمر للمالك فقط.');
@@ -219,19 +219,7 @@ async function handleMessage(message, client) {
       return `**#${tx.id}** | ${TYPE_LABEL[tx.type] ?? tx.type} \`${tx.points}\` | <@${tx.user_id}> | ${tx.reason} | بواسطة <@${tx.added_by}> | ${date}`;
     });
 
-    // تقسيم السجلات إلى دفعات (كل دفعة أقل من 3500 حرف) وإرسال كل دفعة كرسالة embed مستقلة
-    const chunks = [];
-    let current = '';
-    for (const line of lines) {
-      if ((current + '\n' + line).length > 3500) {
-        chunks.push(current);
-        current = line;
-      } else {
-        current = current ? current + '\n' + line : line;
-      }
-    }
-    if (current) chunks.push(current);
-
+    const chunks = chunkLines(lines);
     await message.reply(`📜 إجمالي السجلات: **${txs.length}** — جاري الإرسال (${chunks.length} رسالة)...`);
     for (let i = 0; i < chunks.length; i++) {
       const embed = new EmbedBuilder()
@@ -275,7 +263,7 @@ async function handleMessage(message, client) {
     return message.reply({ embeds: [embed] });
   }
 
-  // ── !سجل @العضو ────────────────────────────────────────────────────────────
+  // ── !سجل @العضو (السجل الكامل من أول عملية) ─────────────────────────────────
   if (command === 'سجل') {
     const userId = parseMention(args[0]);
     if (!userId) return message.reply('⚠️ الاستخدام: `!سجل @العضو`');
@@ -284,7 +272,7 @@ async function handleMessage(message, client) {
     if (!targetUser) return message.reply('❌ لم يتم العثور على العضو.');
 
     const [history, total] = await Promise.all([
-      db.getHistory(userId, message.guildId, 15),
+      db.getFullHistory(userId, message.guildId),
       db.getPoints(userId, message.guildId),
     ]);
 
@@ -294,13 +282,28 @@ async function handleMessage(message, client) {
       `${TYPE_ICON[tx.type] ?? '⚪'} \`#${tx.id}\` **${TYPE_SIGN[tx.type] ?? ''}${tx.points}** — ${tx.reason} — <t:${tx.ts}:d>`
     );
 
-    const embed = new EmbedBuilder().setColor(0x5865F2).setTitle(`📋 سجل ${targetUser.username}`)
-      .setThumbnail(targetUser.displayAvatarURL())
-      .setDescription(lines.join('\n'))
-      .addFields({ name: '🏆 المجموع الحالي', value: `\`${total}\` نقطة` })
-      .setFooter({ text: `آخر ${history.length} عملية` }).setTimestamp();
+    const chunks = chunkLines(lines);
 
-    return message.reply({ embeds: [embed] });
+    // أول رسالة فيها الهيدر (صورة العضو + المجموع الحالي)، والباقي متابعة بدونها
+    const firstEmbed = new EmbedBuilder()
+      .setColor(0x5865F2)
+      .setTitle(`📋 السجل الكامل — ${targetUser.username}`)
+      .setThumbnail(targetUser.displayAvatarURL())
+      .setDescription(chunks[0])
+      .addFields({ name: '🏆 المجموع الحالي', value: `\`${total}\` نقطة` })
+      .setFooter({ text: `إجمالي العمليات: ${history.length} — دفعة 1/${chunks.length}` })
+      .setTimestamp();
+
+    await message.reply({ embeds: [firstEmbed] });
+
+    for (let i = 1; i < chunks.length; i++) {
+      const embed = new EmbedBuilder()
+        .setColor(0x5865F2)
+        .setDescription(chunks[i])
+        .setFooter({ text: `دفعة ${i + 1}/${chunks.length}` });
+      await message.channel.send({ embeds: [embed] });
+    }
+    return;
   }
 
   // ── !ترتيب ─────────────────────────────────────────────────────────────────
@@ -334,6 +337,22 @@ async function handleMessage(message, client) {
   }
 }
 
+// يقسّم مصفوفة أسطر إلى دفعات، كل دفعة أقل من 3500 حرف (حد الـ embed description الآمن)
+function chunkLines(lines) {
+  const chunks = [];
+  let current = '';
+  for (const line of lines) {
+    if ((current + '\n' + line).length > 3500) {
+      chunks.push(current);
+      current = line;
+    } else {
+      current = current ? current + '\n' + line : line;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks.length ? chunks : [''];
+}
+
 async function checkPromotionMsg(message, targetUser, newTotal, prevTotal, settings) {
   const threshold = settings.promotion_threshold;
   const pct     = (newTotal / threshold) * 100;
@@ -354,3 +373,4 @@ async function checkPromotionMsg(message, targetUser, newTotal, prevTotal, setti
 }
 
 module.exports = { handleMessage };
+        
