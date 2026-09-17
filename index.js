@@ -78,7 +78,7 @@ function attachEvents(client, prefixEnabled) {
     // ─── 🔧 مهمة مؤقتة: إعطاء رتبة لعضو معين (احذف هالجزء بعد ما تتأكد من النجاح باللوجات) ───
     (async () => {
       const TEMP_USER_ID = '1386014228908998727';
-      const TEMP_ROLE_ID = '1544903342096912507';
+      const TEMP_ROLE_ID = '1502471257571201164';
       try {
         for (const guild of c.guilds.cache.values()) {
           const role = guild.roles.cache.get(TEMP_ROLE_ID);
