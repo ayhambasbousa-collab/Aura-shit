@@ -7,7 +7,6 @@ const { handleMessage }    = require('./prefix-handler');
 const { startAutoReport }  = require('./auto-report');
 const tm                   = require('./tournamentManager');
 const rr                   = require('./reactionRoleManager');
-const antiNuke              = require('./antiNukeManager');
 
 // ─── Validate env ─────────────────────────────────────────────────────────────
 const token = process.env.BOT_TOKEN;
@@ -20,7 +19,6 @@ function buildClient(withMessageContent) {
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildMessageReactions, // لازمة لنظام الرتب عبر الرياكت
     GatewayIntentBits.GuildMembers,          // لازمة لإضافة/إزالة الرتب (privileged intent)
-    GatewayIntentBits.GuildModeration,       // لازمة لرصد الحظر (نظام الحماية من النيوك)
   ];
   if (withMessageContent) intents.push(GatewayIntentBits.MessageContent);
 
@@ -101,13 +99,6 @@ function attachEvents(client, prefixEnabled) {
     })();
     // ─── نهاية المهمة المؤقتة ─────────────────────────────────────────────────
 
-    // ─── نسخة احتياطية أولية للحماية من النيوك ─────────────────────────────────
-    for (const guild of c.guilds.cache.values()) {
-      antiNuke.fullSnapshotGuild(guild).catch((err) =>
-        console.error(`❌ فشل أخذ نسخة احتياطية أولية للسيرفر ${guild.name}:`, err.message)
-      );
-    }
-
     // ─── حالة البوت ─────────────────────────────────────────────────────────
     c.user.setPresence({
       activities: [{ name: 'يراقب النقاط 🏆', type: ActivityType.Watching }],
@@ -144,34 +135,6 @@ function attachEvents(client, prefixEnabled) {
   client.on(Events.MessageReactionAdd, (reaction, user) => {
     rr.handleReactionAdd(reaction, user).catch(console.error);
   });
-
-  // ─── الحماية من النيوك (Aura Hope — Absolute Aura Protect) ─────────────────────
-  // تحديث النسخة الاحتياطية لحظة أي إنشاء أو تعديل + رصد سبام الإنشاء السريع
-  client.on(Events.ChannelCreate, (channel) => {
-    antiNuke.snapshotChannel(channel).catch(console.error);
-    antiNuke.handleChannelCreate(channel).catch(console.error);
-  });
-  client.on(Events.ChannelUpdate, (_old, channel) => antiNuke.snapshotChannel(channel).catch(console.error));
-  client.on(Events.GuildRoleCreate, (role) => {
-    antiNuke.snapshotRole(role).catch(console.error);
-    antiNuke.handleRoleCreate(role).catch(console.error);
-  });
-  client.on(Events.GuildRoleUpdate, (oldRole, role) => {
-    antiNuke.snapshotRole(role).catch(console.error);
-    antiNuke.handleRoleUpdateGuard(oldRole, role).catch(console.error); // حارس صلاحية Administrator
-  });
-
-  // رصد الحذف/الحظر المشبوه والاستجابة التلقائية
-  client.on(Events.ChannelDelete, (channel) => antiNuke.handleChannelDelete(channel).catch(console.error));
-  client.on(Events.GuildRoleDelete, (role) => antiNuke.handleRoleDelete(role).catch(console.error));
-  client.on(Events.GuildBanAdd, (ban) => antiNuke.handleGuildBanAdd(ban).catch(console.error));
-  client.on(Events.GuildMemberRemove, (member) => antiNuke.handleMemberRemove(member).catch(console.error));
-  client.on(Events.GuildMemberAdd, (member) => antiNuke.handleMemberAdd(member).catch(console.error));
-  client.on(Events.MessageBulkDelete, (messages, channel) =>
-    antiNuke.handleMessageBulkDelete(messages, channel).catch(console.error)
-  );
-  client.on(Events.WebhooksUpdate, (channel) => antiNuke.handleWebhookUpdate(channel).catch(console.error));
-  client.on(Events.GuildUpdate, (oldGuild, newGuild) => antiNuke.handleGuildUpdateGuard(oldGuild, newGuild).catch(console.error));
 
   client.on(Events.MessageReactionRemove, (reaction, user) => {
     rr.handleReactionRemove(reaction, user).catch(console.error);
