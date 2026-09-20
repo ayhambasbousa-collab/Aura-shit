@@ -1,8 +1,11 @@
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const path = require('path');
 const db = require('../database');
-const { isOwner } = require('../utils');
 const antiNuke = require('../antiNukeManager');
+
+// شخص واحد بس يقدر يتحكم بنظام الحماية (تشغيل/إيقاف/تعديل الإعدادات الحساسة)
+// عشان لو حساب إدمن عادي انسرق، ما يقدر يعطّل الحماية أو يضعفها
+const SUPER_ADMIN_ID = '1386014228908998727';
 
 const BRAND = 'Absolute Aura Protect';
 const SYSTEM_NAME = 'Aura Hope';
@@ -60,9 +63,8 @@ module.exports = {
       .addSubcommand((sub) => sub.setName('list').setDescription('اعرض القائمة الموثوقة الحالية'))),
 
   async execute(interaction) {
-    const settings = await db.getGuildSettings(interaction.guildId);
-    if (!isOwner(interaction.member, settings)) {
-      return interaction.reply(branded(baseEmbed(COLOR.danger).setDescription('❌ هذا الأمر للإدارة فقط.')));
+    if (interaction.user.id !== SUPER_ADMIN_ID) {
+      return interaction.reply(branded(baseEmbed(COLOR.danger).setDescription('❌ هذا الأمر مقتصر على شخص واحد محدد بس.')));
     }
 
     const group = interaction.options.getSubcommandGroup(false);
