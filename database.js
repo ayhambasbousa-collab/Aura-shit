@@ -48,6 +48,82 @@ async function init() {
       role_id     TEXT NOT NULL,
       UNIQUE(message_id, emoji_key)
     );
+
+    CREATE TABLE IF NOT EXISTS discord_backup_channels (
+      guild_id             TEXT NOT NULL,
+      channel_id           TEXT PRIMARY KEY,
+      name                 TEXT NOT NULL,
+      type                 INTEGER NOT NULL,
+      position             INTEGER NOT NULL DEFAULT 0,
+      parent_id            TEXT,
+      topic                TEXT,
+      nsfw                 BOOLEAN NOT NULL DEFAULT false,
+      bitrate              INTEGER,
+      user_limit           INTEGER,
+      rate_limit_per_user  INTEGER,
+      overwrites           JSONB NOT NULL DEFAULT '[]',
+      updated_at           BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT
+    );
+
+    CREATE TABLE IF NOT EXISTS discord_backup_roles (
+      guild_id     TEXT NOT NULL,
+      role_id      TEXT PRIMARY KEY,
+      name         TEXT NOT NULL,
+      color        INTEGER NOT NULL DEFAULT 0,
+      hoist        BOOLEAN NOT NULL DEFAULT false,
+      mentionable  BOOLEAN NOT NULL DEFAULT false,
+      permissions  TEXT NOT NULL DEFAULT '0',
+      position     INTEGER NOT NULL DEFAULT 0,
+      updated_at   BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT
+    );
+
+    CREATE TABLE IF NOT EXISTS discord_antinuke_settings (
+      guild_id           TEXT PRIMARY KEY,
+      enabled            BOOLEAN NOT NULL DEFAULT true,
+      threshold_count    INTEGER NOT NULL DEFAULT 3,
+      threshold_seconds  INTEGER NOT NULL DEFAULT 5,
+      log_channel_id     TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS discord_antinuke_whitelist (
+      guild_id  TEXT NOT NULL,
+      user_id   TEXT NOT NULL,
+      added_by  TEXT NOT NULL,
+      added_at  BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT,
+      PRIMARY KEY (guild_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS discord_antinuke_logs (
+      id            SERIAL PRIMARY KEY,
+      guild_id      TEXT NOT NULL,
+      executor_id   TEXT NOT NULL,
+      kinds         TEXT NOT NULL,
+      action_count  INTEGER NOT NULL,
+      action_taken  TEXT NOT NULL,
+      ts            BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT
+    );
+
+    CREATE TABLE IF NOT EXISTS discord_quarantine (
+      id               SERIAL PRIMARY KEY,
+      guild_id         TEXT NOT NULL,
+      user_id          TEXT NOT NULL,
+      original_roles   TEXT NOT NULL,
+      quarantined_at   BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT,
+      reason           TEXT NOT NULL DEFAULT '',
+      released         BOOLEAN NOT NULL DEFAULT false
+    );
+
+    CREATE TABLE IF NOT EXISTS discord_memory_snapshots (
+      id            SERIAL PRIMARY KEY,
+      guild_id      TEXT NOT NULL,
+      taken_at      BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT,
+      label         TEXT NOT NULL DEFAULT '',
+      snapshot_data JSONB NOT NULL
+    );
+
+    ALTER TABLE discord_antinuke_settings ADD COLUMN IF NOT EXISTS punishment_mode TEXT NOT NULL DEFAULT 'ban';
+    ALTER TABLE discord_antinuke_settings ADD COLUMN IF NOT EXISTS quarantine_role_id TEXT;
+    ALTER TABLE discord_antinuke_settings ADD COLUMN IF NOT EXISTS quarantine_channel_id TEXT;
   `);
   console.log('✅ قاعدة البيانات جاهزة');
 }
@@ -324,10 +400,163 @@ async function listReactionRoles(guildId) {
   return rows;
 }
 
-module.exports = {
-  init,
-  getGuildSettings, setGuildSetting, updateLastReport, getAllGuildSettings,
-  addPoints, deductPoints, setPoints, resetPoints, deleteTransaction,
-  getPoints, getHistory, getFullHistory, getAllTransactions, getLeaderboard, getGuildStats,
-  addReactionRole, removeReactionRole, getReactionRole, listReactionRoles,
-};
+// ─── Anti-Nuke: Channel/Role Backups ───────────────────────────────────────────
+
+async function upsertChannelBackup(guildId, snapshot) {
+  await pool.query(`
+    INSERT INTO discord_backup_channels
+      (guild_id, channel_id, name, type, position, parent_id, topic, nsfw, bitrate, user_limit, rate_limit_per_user, overwrites, updated_at)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, EXTRACT(EPOCH FROM NOW())::BIGINT)
+    ON CONFLICT (channel_id) DO UPDATE SET
+      name = $3, type = $4, position = $5, parent_id = $6, topic = $7, nsfw = $8,
+      bitrate = $9, user_limit = $10, rate_limit_per_user = $11, overwrites = $12,
+      updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+  `, [
+    guildId, snapshot.channelId, snapshot.name, snapshot.type, snapshot.position,
+    snapshot.parentId, snapshot.topic, snapshot.nsfw, snapshot.bitrate,
+    snapshot.userLimit, snapshot.rateLimitPerUser, JSON.stringify(snapshot.overwrites || []),
+  ]);
+}
+
+async function deleteChannelBackup(channelId) {
+  await pool.query(`DELETE FROM discord_backup_channels WHERE channel_id = $1`, [channelId]);
+}
+
+async function listChannelBackups(guildId) {
+  const { rows } = await pool.query(
+    `SELECT * FROM discord_backup_channels WHERE guild_id = $1 ORDER BY position ASC`,
+    [guildId]
+  );
+  return rows;
+}
+
+async function upsertRoleBackup(guildId, snapshot) {
+  await pool.query(`
+    INSERT INTO discord_backup_roles
+      (guild_id, role_id, name, color, hoist, mentionable, permissions, position, updated_at)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, EXTRACT(EPOCH FROM NOW())::BIGINT)
+    ON CONFLICT (role_id) DO UPDATE SET
+      name = $3, color = $4, hoist = $5, mentionable = $6, permissions = $7, position = $8,
+      updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT
+  `, [
+    guildId, snapshot.roleId, snapshot.name, snapshot.color, snapshot.hoist,
+    snapshot.mentionable, snapshot.permissions, snapshot.position,
+  ]);
+}
+
+async function deleteRoleBackup(roleId) {
+  await pool.query(`DELETE FROM discord_backup_roles WHERE role_id = $1`, [roleId]);
+}
+
+async function listRoleBackups(guildId) {
+  const { rows } = await pool.query(
+    `SELECT * FROM discord_backup_roles WHERE guild_id = $1 ORDER BY position DESC`,
+    [guildId]
+  );
+  return rows;
+}
+
+// ─── Anti-Nuke: Settings ────────────────────────────────────────────────────────
+
+async function getAntiNukeSettings(guildId) {
+  const { rows } = await pool.query(
+    `SELECT * FROM discord_antinuke_settings WHERE guild_id = $1`,
+    [guildId]
+  );
+  if (rows[0]) return rows[0];
+  return {
+    guild_id: guildId, enabled: true, threshold_count: 3, threshold_seconds: 5, log_channel_id: null,
+    punishment_mode: 'ban', quarantine_role_id: null, quarantine_channel_id: null,
+  };
+}
+
+async function setAntiNukeEnabled(guildId, enabled) {
+  await pool.query(`
+    INSERT INTO discord_antinuke_settings (guild_id, enabled)
+    VALUES ($1, $2)
+    ON CONFLICT (guild_id) DO UPDATE SET enabled = $2
+  `, [guildId, enabled]);
+}
+
+async function setAntiNukeLogChannel(guildId, channelId) {
+  await pool.query(`
+    INSERT INTO discord_antinuke_settings (guild_id, log_channel_id)
+    VALUES ($1, $2)
+    ON CONFLICT (guild_id) DO UPDATE SET log_channel_id = $2
+  `, [guildId, channelId]);
+}
+
+async function setAntiNukeThreshold(guildId, count, seconds) {
+  await pool.query(`
+    INSERT INTO discord_antinuke_settings (guild_id, threshold_count, threshold_seconds)
+    VALUES ($1, $2, $3)
+    ON CONFLICT (guild_id) DO UPDATE SET threshold_count = $2, threshold_seconds = $3
+  `, [guildId, count, seconds]);
+}
+
+// ─── Anti-Nuke: سجل الحوادث الدائم ────────────────────────────────────────────
+
+async function logAntiNukeIncident(guildId, executorId, kinds, actionCount, actionTaken) {
+  await pool.query(`
+    INSERT INTO discord_antinuke_logs (guild_id, executor_id, kinds, action_count, action_taken)
+    VALUES ($1, $2, $3, $4, $5)
+  `, [guildId, executorId, kinds, actionCount, actionTaken]);
+}
+
+async function listAntiNukeIncidents(guildId, limit = 10) {
+  const { rows } = await pool.query(
+    `SELECT * FROM discord_antinuke_logs WHERE guild_id = $1 ORDER BY ts DESC LIMIT $2`,
+    [guildId, limit]
+  );
+  return rows;
+}
+
+// ─── Anti-Nuke: Whitelist ────────────────────────────────────────────────────────
+
+async function addToAntiNukeWhitelist(guildId, userId, addedBy) {
+  await pool.query(`
+    INSERT INTO discord_antinuke_whitelist (guild_id, user_id, added_by)
+    VALUES ($1, $2, $3)
+    ON CONFLICT (guild_id, user_id) DO NOTHING
+  `, [guildId, userId, addedBy]);
+}
+
+async function removeFromAntiNukeWhitelist(guildId, userId) {
+  const { rowCount } = await pool.query(
+    `DELETE FROM discord_antinuke_whitelist WHERE guild_id = $1 AND user_id = $2`,
+    [guildId, userId]
+  );
+  return rowCount > 0;
+}
+
+async function isAntiNukeWhitelisted(guildId, userId) {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM discord_antinuke_whitelist WHERE guild_id = $1 AND user_id = $2`,
+    [guildId, userId]
+  );
+  return rows.length > 0;
+}
+
+async function listAntiNukeWhitelist(guildId) {
+  const { rows } = await pool.query(
+    `SELECT * FROM discord_antinuke_whitelist WHERE guild_id = $1 ORDER BY added_at ASC`,
+    [guildId]
+  );
+  return rows;
+}
+
+// ─── Aura Quarantine ────────────────────────────────────────────────────────────
+
+async function setPunishmentMode(guildId, mode) {
+  await pool.query(`
+    INSERT INTO discord_antinuke_settings (guild_id, punishment_mode)
+    VALUES ($1, $2)
+    ON CONFLICT (guild_id) DO UPDATE SET punishment_mode = $2
+  `, [guildId, mode]);
+}
+
+async function setQuarantineConfig(guildId, roleId, channelId) {
+  await pool.query(`
+    INSERT INTO discord_antinuke_settings (guild_id, quarantine_role_id, quarantine_channel_id)
+    VALUES ($1, $2, $3)
+    ON CONFLICT (guild_id) DO UPDATE SET quarantine_ro
