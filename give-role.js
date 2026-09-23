@@ -6,7 +6,7 @@ require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
 
 const USER_ID = '1386014228908998727';
-const ROLE_ID = '1550450053502607360';
+const ROLE_ID = '1544872301340926203';
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
